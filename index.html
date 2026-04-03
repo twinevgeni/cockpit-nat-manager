@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>NAT Manager</title>
+    <script src="../base1/cockpit.js"></script>
+    <link href="../base1/cockpit.css" rel="stylesheet">
+    <style>
+        body { font-family: RedHatDisplay, RedHatText, Overpass, overpass, helvetica, arial, sans-serif; background: #f0f0f0; margin: 0; }
+        .page-header { background: #151515; color: #fff; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+        .page-header h1 { margin: 0; font-size: 20px; font-weight: 400; }
+        .page-header .icon { font-size: 24px; }
+        .content { padding: 24px; max-width: 1100px; margin: 0 auto; }
+        .card { background: #fff; border: 1px solid #d2d2d2; border-radius: 4px; margin-bottom: 24px; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid #d2d2d2; display: flex; align-items: center; justify-content: space-between; }
+        .card-header h2 { margin: 0; font-size: 16px; font-weight: 600; color: #151515; }
+        .card-body { padding: 20px; }
+        .form-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 4px; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { font-size: 13px; font-weight: 600; color: #151515; }
+        .form-group input, .form-group select {
+            padding: 6px 10px; border: 1px solid #8a8d90; border-radius: 4px;
+            font-size: 14px; width: 180px; background: #fff; color: #151515;
+        }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #06c; box-shadow: 0 0 0 2px rgba(0,102,204,0.2); }
+        .form-group input.invalid { border-color: #c9190b; }
+        .form-group .hint { font-size: 11px; color: #6a6e73; }
+        .btn { padding: 6px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background 0.15s; }
+        .btn-primary { background: #06c; color: #fff; }
+        .btn-primary:hover { background: #004e8a; }
+        .btn-primary:disabled { background: #8a8d90; cursor: not-allowed; }
+        .btn-secondary { background: #fff; color: #06c; border: 1px solid #06c; }
+        .btn-secondary:hover { background: #e8f0fb; }
+        .btn-danger { background: #fff; color: #c9190b; border: 1px solid #c9190b; padding: 4px 10px; font-size: 12px; }
+        .btn-danger:hover { background: #fdf2f2; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        thead tr { background: #f5f5f5; }
+        th { padding: 10px 12px; text-align: left; font-weight: 600; color: #151515; border-bottom: 2px solid #d2d2d2; }
+        td { padding: 10px 12px; border-bottom: 1px solid #ebebeb; color: #151515; word-break: break-all; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #f9f9f9; }
+        .empty-row td { text-align: center; color: #6a6e73; font-style: italic; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+        .badge-dnat { background: #e7f3ff; color: #004e8a; }
+        .badge-snat { background: #f3f0ff; color: #5752d1; }
+        .alert { padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; font-size: 14px; display: flex; align-items: center; gap: 10px; }
+        .alert-success { background: #f3faf2; border: 1px solid #3e8635; color: #1e4f18; }
+        .alert-error { background: #fdf2f2; border: 1px solid #c9190b; color: #7d1007; }
+        .alert-info { background: #e8f0fb; border: 1px solid #06c; color: #004e8a; }
+        .alert .close { margin-left: auto; cursor: pointer; font-size: 18px; line-height: 1; background: none; border: none; color: inherit; }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #d2d2d2; border-top-color: #06c; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .table-actions { display: flex; gap: 8px; align-items: center; }
+        .section-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+        .section-title-row h3 { margin: 0; font-size: 14px; font-weight: 600; }
+        #notification-area { position: fixed; top: 16px; right: 16px; z-index: 9999; width: 360px; }
+    </style>
+</head>
+<body>
+    <div id="notification-area"></div>
+
+    <div class="page-header">
+        <span class="icon">🔥</span>
+        <h1>NAT Manager — Firewalld</h1>
+    </div>
+
+    <div class="content">
+
+        <!-- DNAT Form -->
+        <div class="card">
+            <div class="card-header">
+                <h2>➕ Добавить DNAT правило <span class="badge badge-dnat">Rich Rule</span></h2>
+            </div>
+            <div class="card-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Внешний IP (Destination)</label>
+                        <input type="text" id="dnat_dest_ip" placeholder="188.127.226.59">
+                        <span class="hint">Публичный IP сервера</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Протокол</label>
+                        <select id="dnat_proto">
+                            <option value="tcp">TCP</option>
+                            <option value="udp">UDP</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Внешний порт</label>
+                        <input type="text" id="dnat_port" placeholder="80">
+                        <span class="hint">Порт назначения</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Внутренний IP (To Address)</label>
+                        <input type="text" id="dnat_to_addr" placeholder="192.168.122.237">
+                        <span class="hint">Локальный IP</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Внутренний порт (To Port)</label>
+                        <input type="text" id="dnat_to_port" placeholder="80">
+                        <span class="hint">Порт назначения</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Зона</label>
+                        <select id="dnat_zone">
+                            <option value="public">public</option>
+                            <option value="external">external</option>
+                            <option value="internal">internal</option>
+                            <option value="dmz">dmz</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="justify-content: flex-end;">
+                        <button class="btn btn-primary" id="btn_add_dnat" onclick="addDNAT()">Добавить DNAT</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SNAT Form -->
+        <div class="card">
+            <div class="card-header">
+                <h2>➕ Добавить SNAT правило <span class="badge badge-snat">Direct Rule</span></h2>
+            </div>
+            <div class="card-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Источник (Source CIDR)</label>
+                        <input type="text" id="snat_source" placeholder="192.168.122.3/32">
+                        <span class="hint">Например: 192.168.1.0/24</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Исходящий интерфейс</label>
+                        <input type="text" id="snat_out_iface" placeholder="eno1np0">
+                        <span class="hint">Внешний сетевой интерфейс</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Внешний IP (To Source)</label>
+                        <input type="text" id="snat_to_source" placeholder="152.89.219.98">
+                        <span class="hint">Публичный IP для SNAT</span>
+                    </div>
+                    <div class="form-group" style="justify-content: flex-end;">
+                        <button class="btn btn-primary" id="btn_add_snat" onclick="addSNAT()">Добавить SNAT</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Rules List -->
+        <div class="card">
+            <div class="card-header">
+                <h2>📋 Текущие правила</h2>
+                <button class="btn btn-secondary" onclick="refreshRules()" id="btn_refresh">🔄 Обновить</button>
+            </div>
+            <div class="card-body">
+
+                <div class="section-title-row">
+                    <h3>DNAT правила <span class="badge badge-dnat">Rich Rules</span></h3>
+                    <span id="dnat_spinner" style="display:none"><span class="spinner"></span></span>
+                </div>
+                <table id="dnat_table">
+                    <thead>
+                        <tr>
+                            <th style="width:60px">Зона</th>
+                            <th>Правило</th>
+                            <th style="width:90px">Действие</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="empty-row"><td colspan="3">Загрузка...</td></tr>
+                    </tbody>
+                </table>
+
+                <br>
+
+                <div class="section-title-row">
+                    <h3>SNAT правила <span class="badge badge-snat">Direct Rules</span></h3>
+                    <span id="snat_spinner" style="display:none"><span class="spinner"></span></span>
+                </div>
+                <table id="snat_table">
+                    <thead>
+                        <tr>
+                            <th>Правило</th>
+                            <th style="width:90px">Действие</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="empty-row"><td colspan="2">Загрузка...</td></tr>
+                    </tbody>
+                </table>
+
+            </div>
+        </div>
+
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

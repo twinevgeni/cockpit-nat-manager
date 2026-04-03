@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "tools": {
+    "nat-manager": {
+      "label": "NAT Manager",
+      "path": "index.html"
+    }
+  }
+}
