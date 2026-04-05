@@ -3,7 +3,7 @@
 const ZONES = ["public", "external", "internal", "dmz"];
 
 function isProtectedGuestInputRule(line) {
-    return line.includes('oif "virbr0"') && line.includes("reject");
+    return line.includes('oif "virbr0" counter packets 9 bytes 5417 reject') || line.includes("handle 324");
 }
 
 const NFT_RULE_CLEANUP_TARGETS = [
