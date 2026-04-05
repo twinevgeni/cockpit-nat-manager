@@ -2,8 +2,71 @@
 
 const ZONES = ["public", "external", "internal", "dmz"];
 
+function isProtectedGuestInputRule(line) {
+    return line.includes('oif "virbr0"') && line.includes("reject");
+}
+
+const NFT_RULE_CLEANUP_TARGETS = [
+    {
+        family: "ip",
+        table: "libvirt_network",
+        chain: "guest_input",
+        match: line => (line.includes("reject") || line.includes("drop")) && !isProtectedGuestInputRule(line)
+    }
+];
+
 function runCommand(args) {
     return cockpit.spawn(args, { superuser: "require", err: "message" });
+}
+
+function reloadFirewallAndCleanup() {
+    return runCommand(["firewall-cmd", "--reload"])
+        .then(() => cleanupNftRules());
+}
+
+function cleanupNftRules() {
+    const tasks = NFT_RULE_CLEANUP_TARGETS.map(cleanupNftChainRules);
+    return Promise.all(tasks).catch(err => {
+        console.warn("NFT cleanup error:", err);
+    });
+}
+
+function cleanupNftChainRules(target) {
+    const { family, table, chain, match } = target;
+
+    return runCommand(["nft", "-a", "list", "chain", family, table, chain])
+        .then(data => {
+            const handles = extractMatchingHandles(data, match);
+            if (handles.length === 0) return null;
+
+            return handles.reduce(
+                (promise, handle) => promise.then(() =>
+                    runCommand(["nft", "delete", "rule", family, table, chain, "handle", String(handle)])
+                ),
+                Promise.resolve()
+            );
+        })
+        .catch(err => {
+            const message = String(err || "");
+            if (message.includes("No such file or directory") || message.includes("No such chain")) {
+                return null;
+            }
+            throw err;
+        });
+}
+
+function extractMatchingHandles(data, match) {
+    if (!data) return [];
+
+    return data
+        .split("\n")
+        .map(line => line.trim())
+        .filter(line => line && line.includes("handle ") && match(line))
+        .map(line => {
+            const handleMatch = line.match(/\bhandle\s+(\d+)\b/);
+            return handleMatch ? handleMatch[1] : null;
+        })
+        .filter(Boolean);
 }
 
 // ── Notifications ──────────────────────────────────────────────────────────
@@ -178,7 +241,7 @@ function addDNAT() {
     btn.textContent = "Добавление...";
 
     runCommand(["firewall-cmd", "--permanent", `--zone=${zone}`, "--add-rich-rule", rule])
-        .then(() => runCommand(["firewall-cmd", "--reload"]))
+        .then(() => reloadFirewallAndCleanup())
         .then(() => {
             notify(`DNAT правило добавлено в зону "${zone}"`, "success");
             clearDNATForm();
@@ -211,7 +274,7 @@ function addSNAT() {
     btn.textContent = "Добавление...";
 
     runCommand(["firewall-cmd", "--permanent", "--direct", "--add-rule", ...args])
-        .then(() => runCommand(["firewall-cmd", "--reload"]))
+        .then(() => reloadFirewallAndCleanup())
         .then(() => {
             notify("SNAT правило добавлено", "success");
             clearSNATForm();
@@ -234,7 +297,7 @@ function removeDNAT(zone, rule, btn) {
     btn.textContent = "...";
 
     runCommand(["firewall-cmd", "--permanent", `--zone=${zone}`, "--remove-rich-rule", rule])
-        .then(() => runCommand(["firewall-cmd", "--reload"]))
+        .then(() => reloadFirewallAndCleanup())
         .then(() => {
             notify("DNAT правило удалено", "success");
             refreshRules();
@@ -255,7 +318,7 @@ function removeSNAT(rule, btn) {
     const parts = rule.trim().split(/\s+/);
 
     runCommand(["firewall-cmd", "--permanent", "--direct", "--remove-rule", ...parts])
-        .then(() => runCommand(["firewall-cmd", "--reload"]))
+        .then(() => reloadFirewallAndCleanup())
         .then(() => {
             notify("SNAT правило удалено", "success");
             refreshRules();
