@@ -85,35 +85,25 @@ function extractMatchingHandles(data, match) {
 function extractGuestInputCleanupHandles(data) {
     if (!data) return [];
 
-    const rules = data
+    const lines = data
         .split("\n")
         .map(line => line.trim())
-        .filter(Boolean)
-        .map((line, index) => {
-            const handleMatch = line.match(/\bhandle\s+(\d+)\b/);
-            return handleMatch
-                ? { line, index, handle: handleMatch[1] }
-                : null;
+        .filter(Boolean);
+
+    // Collect all disposable reject/drop rules (no ip daddr, no ct state, no dport)
+    const disposable = lines
+        .filter(line => isDisposableGuestInputRule(line))
+        .map(line => {
+            const m = line.match(/\bhandle\s+(\d+)\b/);
+            return m ? { line, handle: m[1] } : null;
         })
         .filter(Boolean);
 
-    const terminalRules = rules.filter(rule => isTerminalGuestInputRejectRule(rule.line));
-    const protectedRule = terminalRules.pop() || null;
-    const protectedHandle = protectedRule ? protectedRule.handle : null;
+    if (disposable.length === 0) return [];
 
-    return rules
-        .map(({ line, handle }) => {
-            const isProtectedReject = protectedHandle !== null && handle === protectedHandle;
-            const shouldDelete = !isProtectedReject && isDisposableGuestInputRule(line);
-            return shouldDelete ? handle : null;
-        })
-        .filter(Boolean);
-}
-
-function isTerminalGuestInputRejectRule(line) {
-    if (!line) return false;
-
-    return /^oif\s+"virbr0"\s+counter\s+packets\s+\d+\s+bytes\s+\d+\s+reject\s+#\s+handle\s+\d+$/i.test(line);
+    // Protect the last one (terminal reject at end of chain)
+    const toDelete = disposable.slice(0, -1);
+    return toDelete.map(r => r.handle);
 }
 
 function isDisposableGuestInputRule(line) {
