@@ -36,21 +36,29 @@ function cleanupNftRules() {
 
 function cleanupNftChainRules(target) {
     const { family, table, chain, match, extractHandles } = target;
+    const getHandles = data => typeof extractHandles === "function"
+        ? extractHandles(data)
+        : extractMatchingHandles(data, match);
 
-    return runCommand(["nft", "-a", "list", "chain", family, table, chain])
-        .then(data => {
-            const handles = typeof extractHandles === "function"
-                ? extractHandles(data)
-                : extractMatchingHandles(data, match);
-            if (handles.length === 0) return null;
+    function cleanupPass(attemptsLeft) {
+        return runCommand(["nft", "-a", "list", "chain", family, table, chain])
+            .then(data => {
+                const handles = getHandles(data);
+                if (handles.length === 0) return null;
 
-            return handles.reduce(
-                (promise, handle) => promise.then(() =>
-                    runCommand(["nft", "delete", "rule", family, table, chain, "handle", String(handle)])
-                ),
-                Promise.resolve()
-            );
-        })
+                return handles.reduce(
+                    (promise, handle) => promise.then(() =>
+                        runCommand(["nft", "delete", "rule", family, table, chain, "handle", String(handle)])
+                    ),
+                    Promise.resolve()
+                ).then(() => {
+                    if (attemptsLeft <= 1) return null;
+                    return cleanupPass(attemptsLeft - 1);
+                });
+            });
+    }
+
+    return cleanupPass(5)
         .catch(err => {
             const message = String(err || "");
             if (message.includes("No such file or directory") || message.includes("No such chain")) {
