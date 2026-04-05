@@ -104,6 +104,16 @@ body {
 
 .form-actions {
     justify-content: flex-end;
+    align-self: flex-end;
+    padding-bottom: 0;
+}
+
+.form-group .hint-placeholder {
+    font-size: 11px;
+    color: transparent;
+    user-select: none;
+    pointer-events: none;
+    display: block;
 }
 
 .btn {
