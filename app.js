@@ -2,16 +2,12 @@
 
 const ZONES = ["public", "external", "internal", "dmz"];
 
-function isProtectedGuestInputRule(line) {
-    return line.includes('oif "virbr0" counter packets 9 bytes 5417 reject') || line.includes("handle 324");
-}
-
 const NFT_RULE_CLEANUP_TARGETS = [
     {
         family: "ip",
         table: "libvirt_network",
         chain: "guest_input",
-        match: line => (line.includes("reject") || line.includes("drop")) && !isProtectedGuestInputRule(line)
+        extractHandles: extractGuestInputCleanupHandles
     }
 ];
 
@@ -39,11 +35,13 @@ function cleanupNftRules() {
 }
 
 function cleanupNftChainRules(target) {
-    const { family, table, chain, match } = target;
+    const { family, table, chain, match, extractHandles } = target;
 
     return runCommand(["nft", "-a", "list", "chain", family, table, chain])
         .then(data => {
-            const handles = extractMatchingHandles(data, match);
+            const handles = typeof extractHandles === "function"
+                ? extractHandles(data)
+                : extractMatchingHandles(data, match);
             if (handles.length === 0) return null;
 
             return handles.reduce(
@@ -74,6 +72,52 @@ function extractMatchingHandles(data, match) {
             return handleMatch ? handleMatch[1] : null;
         })
         .filter(Boolean);
+}
+
+function extractGuestInputCleanupHandles(data) {
+    if (!data) return [];
+
+    const rules = data
+        .split("\n")
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map((line, index) => {
+            const handleMatch = line.match(/\bhandle\s+(\d+)\b/);
+            return handleMatch
+                ? { line, index, handle: handleMatch[1] }
+                : null;
+        })
+        .filter(Boolean);
+
+    const protectedRule = rules
+        .filter(rule => isTerminalGuestInputRejectRule(rule.line))
+        .pop() || null;
+
+    const protectedHandle = protectedRule ? protectedRule.handle : null;
+
+    return rules
+        .map(({ line, handle }) => {
+            const isProtectedReject = protectedHandle !== null && handle === protectedHandle;
+            const shouldDelete = !isProtectedReject && isDisposableGuestInputRule(line);
+
+            return shouldDelete ? handle : null;
+        })
+        .filter(Boolean);
+}
+
+function isTerminalGuestInputRejectRule(line) {
+    if (!line) return false;
+
+    return /^oif\s+"virbr0"\s+counter\s+packets\s+\d+\s+bytes\s+\d+\s+reject\s+#\s+handle\s+\d+$/i.test(line);
+}
+
+function isDisposableGuestInputRule(line) {
+    if (!line) return null;
+
+    const isGuestInputVerdict = /^oif\s+"virbr0"\b/i.test(line) && /\b(reject|drop)\b/i.test(line);
+    const hasExplicitDestinationRule = /\bip\s+daddr\b/i.test(line) || /\b(ct\s+state|tcp\s+dport|udp\s+dport)\b/i.test(line);
+
+    return isGuestInputVerdict && !hasExplicitDestinationRule;
 }
 
 function ensureGuestInputAcceptRule(ip, protocol, port) {
