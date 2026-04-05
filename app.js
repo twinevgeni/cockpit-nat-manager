@@ -97,17 +97,14 @@ function extractGuestInputCleanupHandles(data) {
         })
         .filter(Boolean);
 
-    const protectedRule = rules
-        .filter(rule => isTerminalGuestInputRejectRule(rule.line))
-        .pop() || null;
-
+    const terminalRules = rules.filter(rule => isTerminalGuestInputRejectRule(rule.line));
+    const protectedRule = terminalRules.pop() || null;
     const protectedHandle = protectedRule ? protectedRule.handle : null;
 
     return rules
         .map(({ line, handle }) => {
             const isProtectedReject = protectedHandle !== null && handle === protectedHandle;
             const shouldDelete = !isProtectedReject && isDisposableGuestInputRule(line);
-
             return shouldDelete ? handle : null;
         })
         .filter(Boolean);
@@ -122,7 +119,7 @@ function isTerminalGuestInputRejectRule(line) {
 function isDisposableGuestInputRule(line) {
     if (!line) return null;
 
-    const isGuestInputVerdict = /^oif\s+"virbr0"\b/i.test(line) && /\b(reject|drop)\b/i.test(line);
+    const isGuestInputVerdict = /^oif\s+"virbr0"/i.test(line) && /\b(reject|drop)\b/i.test(line);
     const hasExplicitDestinationRule = /\bip\s+daddr\b/i.test(line) || /\b(ct\s+state|tcp\s+dport|udp\s+dport)\b/i.test(line);
 
     return isGuestInputVerdict && !hasExplicitDestinationRule;
@@ -406,6 +403,7 @@ function addDNAT() {
     btn.textContent = "Добавление...";
 
     runCommand(["firewall-cmd", "--permanent", `--zone=${zone}`, "--add-rich-rule", rule])
+        .then(() => reloadFirewallAndCleanup())
         .then(() => ensureGuestInputAcceptRule(toAddr, proto, toPort))
         .then(() => reloadFirewallAndCleanup())
         .then(() => {
