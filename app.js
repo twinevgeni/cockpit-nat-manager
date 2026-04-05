@@ -78,7 +78,9 @@ function notify(message, type) {
     const div = document.createElement("div");
     div.className = `alert alert-${type}`;
     div.innerHTML = `<span>${icons[type] || ""} ${escapeHtml(message)}</span>
-        <button class="close" onclick="this.parentElement.remove()">×</button>`;
+        <button class="close" type="button">×</button>`;
+    const closeButton = div.querySelector(".close");
+    closeButton.addEventListener("click", () => div.remove());
     area.appendChild(div);
     setTimeout(() => { if (div.parentElement) div.remove(); }, 5000);
 }
@@ -134,8 +136,8 @@ function validateSNATForm() {
 
 // ── Spinner helpers ────────────────────────────────────────────────────────
 
-function showSpinner(id) { document.getElementById(id).style.display = "inline"; }
-function hideSpinner(id) { document.getElementById(id).style.display = "none"; }
+function showSpinner(id) { document.getElementById(id).classList.remove("is-hidden"); }
+function hideSpinner(id) { document.getElementById(id).classList.add("is-hidden"); }
 
 // ── List rules ─────────────────────────────────────────────────────────────
 
@@ -351,5 +353,8 @@ function clearSNATForm() {
 // ── Init ───────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("btn_add_dnat").addEventListener("click", addDNAT);
+    document.getElementById("btn_add_snat").addEventListener("click", addSNAT);
+    document.getElementById("btn_refresh").addEventListener("click", refreshRules);
     refreshRules();
 });

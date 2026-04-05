@@ -1,9 +1,0 @@
-{
-  "name": "cockpit-nat-manager",
-  "version": "1.0.0",
-  "description": "Cockpit plugin for NAT management on AlmaLinux",
-  "license": "MIT",
-  "scripts": {
-    "install": "mkdir -p ~/.local/share/cockpit/nat-manager; cp manifest.json src/index.html src/index.js ~/.local/share/cockpit/nat-manager/"
-  }
-}
