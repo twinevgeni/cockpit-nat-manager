@@ -15,6 +15,13 @@ const NFT_RULE_CLEANUP_TARGETS = [
     }
 ];
 
+const NFT_GUEST_INPUT_TARGET = {
+    family: "ip",
+    table: "libvirt_network",
+    chain: "guest_input",
+    outInterface: "virbr0"
+};
+
 function runCommand(args) {
     return cockpit.spawn(args, { superuser: "require", err: "message" });
 }
@@ -67,6 +74,110 @@ function extractMatchingHandles(data, match) {
             return handleMatch ? handleMatch[1] : null;
         })
         .filter(Boolean);
+}
+
+function ensureGuestInputAcceptRule(ip, protocol, port) {
+    const { family, table, chain, outInterface } = NFT_GUEST_INPUT_TARGET;
+
+    return runCommand(["nft", "-a", "list", "chain", family, table, chain])
+        .then(data => {
+            const existingRule = findGuestInputAcceptRule(data, ip, protocol, outInterface);
+            const ports = mergePorts(existingRule ? existingRule.ports : [], port);
+            const portSet = formatNftPortSet(ports);
+
+            if (!existingRule) {
+                return runCommand([
+                    "nft", "insert", "rule", family, table, chain,
+                    "oif", outInterface,
+                    "ip", "daddr", ip,
+                    protocol,
+                    "dport", portSet,
+                    "accept"
+                ]);
+            }
+
+            return runCommand(["nft", "delete", "rule", family, table, chain, "handle", existingRule.handle])
+                .then(() => runCommand([
+                    "nft", "insert", "rule", family, table, chain,
+                    "oif", outInterface,
+                    "ip", "daddr", ip,
+                    protocol,
+                    "dport", portSet,
+                    "accept"
+                ]));
+        })
+        .catch(err => {
+            const message = String(err || "");
+            if (message.includes("No such file or directory") || message.includes("No such chain")) {
+                return null;
+            }
+            throw err;
+        });
+}
+
+function findGuestInputAcceptRule(data, ip, protocol, outInterface) {
+    if (!data) return null;
+
+    const normalizedProtocol = String(protocol || "").toLowerCase();
+
+    return data
+        .split("\n")
+        .map(line => line.trim())
+        .map(line => parseGuestInputAcceptRule(line, outInterface))
+        .filter(Boolean)
+        .find(rule => rule.ip === ip && rule.protocol === normalizedProtocol) || null;
+}
+
+function parseGuestInputAcceptRule(line, outInterface) {
+    if (!line || !line.includes("accept") || !line.includes("handle ")) return null;
+
+    const escapedInterface = escapeRegExp(outInterface);
+    const match = line.match(new RegExp(
+        `^oif\\s+"${escapedInterface}"\\s+ip\\s+daddr\\s+(\\S+)\\s+(tcp|udp)\\s+dport\\s+(.+?)\\s+accept\\s+#\\s+handle\\s+(\\d+)$`,
+        "i"
+    ));
+
+    if (!match) return null;
+
+    const [, ip, protocol, portsRaw, handle] = match;
+    const ports = parseNftPorts(portsRaw);
+    if (ports.length === 0) return null;
+
+    return {
+        ip,
+        protocol: protocol.toLowerCase(),
+        ports,
+        handle
+    };
+}
+
+function parseNftPorts(portsRaw) {
+    if (!portsRaw) return [];
+
+    const normalized = portsRaw.trim();
+    const value = normalized.startsWith("{") && normalized.endsWith("}")
+        ? normalized.slice(1, -1)
+        : normalized;
+
+    return value
+        .split(",")
+        .map(port => port.trim())
+        .filter(port => validatePort(port));
+}
+
+function mergePorts(existingPorts, newPort) {
+    const merged = [...existingPorts.map(String), String(newPort)];
+    return Array.from(new Set(merged))
+        .filter(port => validatePort(port))
+        .sort((left, right) => Number(left) - Number(right));
+}
+
+function formatNftPortSet(ports) {
+    return `{ ${ports.join(", ")} }`;
+}
+
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // ── Notifications ──────────────────────────────────────────────────────────
@@ -243,6 +354,7 @@ function addDNAT() {
     btn.textContent = "Добавление...";
 
     runCommand(["firewall-cmd", "--permanent", `--zone=${zone}`, "--add-rich-rule", rule])
+        .then(() => ensureGuestInputAcceptRule(toAddr, proto, toPort))
         .then(() => reloadFirewallAndCleanup())
         .then(() => {
             notify(`DNAT правило добавлено в зону "${zone}"`, "success");
