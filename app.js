@@ -22,8 +22,13 @@ function runCommand(args) {
     return cockpit.spawn(args, { superuser: "require", err: "message" });
 }
 
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function reloadFirewallAndCleanup() {
     return runCommand(["firewall-cmd", "--reload"])
+        .then(() => sleep(1500))
         .then(() => cleanupNftRules());
 }
 
@@ -46,10 +51,13 @@ function cleanupNftChainRules(target) {
                 const handles = getHandles(data);
                 if (handles.length === 0) return null;
 
+                console.log("[cleanup] handles to delete:", handles);
                 return handles.reduce(
-                    (promise, handle) => promise.then(() =>
-                        runCommand(["nft", "delete", "rule", family, table, chain, "handle", String(handle)])
-                    ),
+                    (promise, handle) => promise.then(() => {
+                        console.log("[cleanup] deleting handle", handle);
+                        return runCommand(["nft", "delete", "rule", family, table, chain, "handle", String(handle)])
+                            .catch(err => console.warn("[cleanup] delete handle", handle, "error:", String(err)));
+                    }),
                     Promise.resolve()
                 ).then(() => {
                     if (attemptsLeft <= 1) return null;
@@ -61,6 +69,7 @@ function cleanupNftChainRules(target) {
     return cleanupPass(5)
         .catch(err => {
             const message = String(err || "");
+            console.warn("[cleanup] chain error:", message);
             if (message.includes("No such file or directory") || message.includes("No such chain")) {
                 return null;
             }
@@ -90,6 +99,8 @@ function extractGuestInputCleanupHandles(data) {
         .map(line => line.trim())
         .filter(Boolean);
 
+    console.log("[cleanup] all lines:", lines);
+
     // Collect all disposable reject/drop rules (no ip daddr, no ct state, no dport)
     const disposable = lines
         .filter(line => isDisposableGuestInputRule(line))
@@ -99,10 +110,13 @@ function extractGuestInputCleanupHandles(data) {
         })
         .filter(Boolean);
 
+    console.log("[cleanup] disposable:", disposable);
+
     if (disposable.length === 0) return [];
 
     // Protect the last one (terminal reject at end of chain)
     const toDelete = disposable.slice(0, -1);
+    console.log("[cleanup] toDelete:", toDelete);
     return toDelete.map(r => r.handle);
 }
 
@@ -393,7 +407,6 @@ function addDNAT() {
     btn.textContent = "Добавление...";
 
     runCommand(["firewall-cmd", "--permanent", `--zone=${zone}`, "--add-rich-rule", rule])
-        .then(() => reloadFirewallAndCleanup())
         .then(() => ensureGuestInputAcceptRule(toAddr, proto, toPort))
         .then(() => reloadFirewallAndCleanup())
         .then(() => {
